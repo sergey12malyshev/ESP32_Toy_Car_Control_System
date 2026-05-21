@@ -31,8 +31,17 @@ const char* password = "12345678";
 
 WebServer server(80);
 
-uint8_t currentDriveSpeedTarget = 200;   // текущая целевая скорость (0-255)
-uint8_t currentSteerIntensity = 200;     // интенсивность поворота (0-255)
+uint8_t currentDriveSpeedTarget = 185;   // текущая целевая скорость (0-255)
+uint8_t currentSteerIntensity = 215;     // интенсивность поворота (0-255)
+
+struct Version
+{
+    uint8_t major;
+    uint8_t minor;
+    uint8_t patch;
+};
+
+Version version = {0, 1, 0};
 
 // Low-Level Motor Control
 void initPWM() 
@@ -320,12 +329,12 @@ const char index_html[] PROGMEM = R"rawliteral(
     </div>
 
     <div class="slider-container">
-        <div class="slider-label"><span>Max Speed</span><span id="speedValue">200</span></div>
-        <input type="range" id="speedSlider" min="100" max="250" value="200">
+        <div class="slider-label"><span>Max Speed</span><span id="speedValue">185</span></div>
+        <input type="range" id="speedSlider" min="100" max="250" value="185">
     </div>
     <div class="slider-container">
-        <div class="slider-label"><span>Steer Intensity</span><span id="steerValue">200</span></div>
-        <input type="range" id="steerSlider" min="100" max="250" value="200">
+        <div class="slider-label"><span>Steer Intensity</span><span id="steerValue">215</span></div>
+        <input type="range" id="steerSlider" min="100" max="250" value="215">
     </div>
 
     <div class="button-row">
