@@ -19,6 +19,12 @@
 #define PWM_CH_DRIVE    0
 #define PWM_CH_STEER    1
 
+#define PWM_MAX_DRIVE    250
+#define PWM_MAX_STEER    250
+
+#define PWM_MIN_DRIVE    1
+#define PWM_MIN_STEER    1
+
 // Wi-Fi Access Point
 const char* ssid = "ESP32_Car";
 const char* password = "12345678";
@@ -55,7 +61,12 @@ void softStartForward(uint8_t targetSpeed, uint16_t rampTime_ms)
 {
     if (targetSpeed == 0) 
     {
-        return;
+      return;
+    }
+
+    if (targetSpeed > PWM_MAX_DRIVE)
+    {
+      targetSpeed = (uint8_t) PWM_MAX_DRIVE;
     }
 
     uint16_t steps = 40;
@@ -76,6 +87,11 @@ void softStartBackward(uint8_t targetSpeed, uint16_t rampTime_ms)
         return;
     }
 
+    if (targetSpeed > PWM_MAX_DRIVE)
+    {
+      targetSpeed = (uint8_t) PWM_MAX_DRIVE;
+    }
+
     uint16_t steps = 40;
     uint16_t stepDelay = rampTime_ms / steps;
     for (uint8_t i = 1; i <= steps; i++) 
@@ -94,6 +110,11 @@ void stopMovement()
 
 void turnLeft(uint8_t intensity) 
 {
+    if (intensity > PWM_MAX_STEER)
+    {
+      intensity = (uint8_t) PWM_MAX_STEER;
+    }
+
     ledcDetachPin(PIN_RIGHT);
     ledcAttachPin(PIN_LEFT, PWM_CH_STEER);
     ledcWrite(PWM_CH_STEER, intensity);
@@ -102,6 +123,11 @@ void turnLeft(uint8_t intensity)
 
 void turnRight(uint8_t intensity) 
 {
+    if (intensity > PWM_MAX_STEER)
+    {
+      intensity = (uint8_t) PWM_MAX_STEER;
+    }
+
     ledcDetachPin(PIN_LEFT);
     ledcAttachPin(PIN_RIGHT, PWM_CH_STEER);
     ledcWrite(PWM_CH_STEER, intensity);
@@ -295,11 +321,11 @@ const char index_html[] PROGMEM = R"rawliteral(
 
     <div class="slider-container">
         <div class="slider-label"><span>Max Speed</span><span id="speedValue">200</span></div>
-        <input type="range" id="speedSlider" min="0" max="255" value="200">
+        <input type="range" id="speedSlider" min="100" max="250" value="200">
     </div>
     <div class="slider-container">
         <div class="slider-label"><span>Steer Intensity</span><span id="steerValue">200</span></div>
-        <input type="range" id="steerSlider" min="0" max="255" value="200">
+        <input type="range" id="steerSlider" min="100" max="250" value="200">
     </div>
 
     <div class="button-row">
@@ -427,13 +453,13 @@ void handleCmd() {
     }
     else if (cmd == "speed") {
         if (server.hasArg("v")) {
-            currentDriveSpeedTarget = constrain(server.arg("v").toInt(), 0, 255);
+            currentDriveSpeedTarget = constrain(server.arg("v").toInt(), 100, 250);
         }
         server.send(200, "text/plain", "OK");
     }
     else if (cmd == "steer_intensity") {
         if (server.hasArg("v")) {
-            currentSteerIntensity = constrain(server.arg("v").toInt(), 0, 255);
+            currentSteerIntensity = constrain(server.arg("v").toInt(), 100, 250);
         }
         server.send(200, "text/plain", "OK");
     }
@@ -469,8 +495,6 @@ void setup() {
     initWiFiAP();
     server.on("/", handleRoot);
     server.on("/cmd", handleCmd);
-
-
 
 
     // OTA Update
