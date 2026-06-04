@@ -4,6 +4,14 @@
 
 #include <Update.h>
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
+
+// Глобальная переменная для времени последней команды
+static volatile uint32_t lastCommandTime = 0;
+
+
 // Pin Definitions
 #define PIN_FORWARD     18
 #define PIN_BACKWARD    5
@@ -417,6 +425,9 @@ void handleRoot() {
 }
 
 void handleCmd() {
+
+    lastCommandTime = millis();
+
     if (!server.hasArg("q")) {
         server.send(400, "text/plain", "Missing command");
         return;
@@ -484,6 +495,34 @@ void initWiFiAP() {
     Serial.println(WiFi.softAPIP());
 }
 
+void safetyTask(void * parameter) {
+
+    const uint32_t COMMAND_TIMEOUT = 30000; // 30 секунд Таймаут бездействия (в миллисекундах)
+
+    vTaskDelay(10000 / portTICK_PERIOD_MS);
+
+    for (;;) {
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
+        
+        // Количество подключённых клиентов
+        int clients = WiFi.softAPgetStationNum();
+        // Время с последней команды
+        uint32_t now = (uint32_t) millis();
+        uint32_t elapsed = now - lastCommandTime;
+        
+        if (clients == 0 || elapsed > COMMAND_TIMEOUT) {
+            // Аварийная остановка (idempotent, можно вызывать много раз)
+            allOff();
+
+            soundOn();
+            delay(100);
+            Serial.printf("Not connect!");
+            soundOff();
+            stopLightsOn();
+        }
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     initPWM();
@@ -498,13 +537,16 @@ void setup() {
 
     soundOn();
     delay(100);
+    Serial.printf("Firmware version: %d.%d.%d\n", version.major, version.minor, version.patch);
+
     soundOff();
     delay(1000);
 
     initWiFiAP();
     server.on("/", handleRoot);
     server.on("/cmd", handleCmd);
-
+    
+    lastCommandTime = millis();
 
     // OTA Update
     // Страница с формой для загрузки (GET)
@@ -549,9 +591,23 @@ void setup() {
 
     server.begin();
     Serial.println("HTTP server started");
+
+    // Создаём задачу безопасности на втором ядре (ядро 1)
+    xTaskCreatePinnedToCore(
+        safetyTask,      // функция задачи
+        "SafetyTask",    // имя
+        2048,            // размер стека
+        NULL,            // параметр
+        1,               // приоритет (низкий)
+        NULL,            // handle
+        1                // ядро (1)
+    );
+    Serial.println("Safety task started");
 }
+
 
 void loop() {
     server.handleClient();
     delay(10);
 }
+
