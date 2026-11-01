@@ -7,6 +7,10 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+// ===== БАТАРЕЯ (SMBus) =====
+#include <Wire.h>
+#include <esp_task_wdt.h>
+
 
 // Глобальная переменная для времени последней команды
 static volatile uint32_t lastCommandTime = 0;
@@ -16,7 +20,7 @@ static volatile uint32_t lastCommandTime = 0;
 #define PIN_FORWARD     18
 #define PIN_BACKWARD    5
 #define PIN_LEFT        19
-#define PIN_RIGHT       21
+#define PIN_RIGHT       23
 #define PIN_STOP_RIGHT  15
 #define PIN_STOP_LEFT   2
 #define PIN_SOUND       4
@@ -32,6 +36,30 @@ static volatile uint32_t lastCommandTime = 0;
 
 #define PWM_MIN_DRIVE    1
 #define PWM_MIN_STEER    1
+
+// ===== БАТАРЕЯ (SMBus) =====
+// SMBD (данные) -> D22 -> GPIO22
+// SMBC (тактовая) -> D21 -> GPIO21
+#define SMBUS_SDA_PIN  21
+#define SMBUS_SCL_PIN  22
+#define BATTERY_ADDR   0x0B    // Стандартный адрес SMBus-батареи
+
+// Регистры SBS (Smart Battery System)
+#define REG_TEMPERATURE      0x08
+#define REG_VOLTAGE          0x09
+#define REG_CURRENT          0x0A
+#define REG_RELATIVE_SOC     0x0D
+
+// Последние прочитанные значения
+static volatile uint16_t batteryVoltage_mV   = 0;
+static volatile int16_t  batteryCurrent_mA   = 0;
+static volatile int16_t  batteryTemperature_C = 0;
+static volatile uint8_t  batterySOC_percent  = 0;
+static volatile bool     batteryDataValid    = false;
+
+// Мьютекс для доступа к данным батареи (из веб-обработчиков и задачи)
+static SemaphoreHandle_t batteryDataMutex = NULL;
+
 
 // Wi-Fi Access Point
 const char* ssid = "ESP32_Car";
@@ -102,7 +130,7 @@ void softStartBackward(uint8_t targetSpeed, uint16_t rampTime_ms)
     if (targetSpeed == 0) 
     {
         return;
-    }
+    }f
 
     if (targetSpeed > PWM_MAX_DRIVE)
     {
@@ -312,6 +340,39 @@ const char index_html[] PROGMEM = R"rawliteral(
             color: #aaa;
             font-size: 0.8rem;
         }
+        .battery-panel {
+            background: #0f3460;
+            border-radius: 20px;
+            padding: 15px;
+            margin: 15px 0;
+            color: #ddd;
+            font-size: 0.95rem;
+        }
+        .battery-panel h3 {
+            margin: 0 0 10px 0;
+            color: #e94560;
+            font-size: 1rem;
+            text-align: center;
+        }
+        .battery-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 4px 0;
+        }
+        .battery-value { color: #4ade80; font-weight: bold; }
+        .bar-wrap {
+            background: #0a1c2e;
+            border-radius: 10px;
+            height: 14px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+        .bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #e94560, #4ade80);
+            width: 0%;
+            transition: width 0.4s;
+        }
         @media (max-width: 480px) {
             .dpad-btn { width: 70px; height: 70px; font-size: 1.6rem; }
         }
@@ -350,6 +411,16 @@ const char index_html[] PROGMEM = R"rawliteral(
         <div class="action-btn" id="btn-lights-on">LIGHTS ON</div>
         <div class="action-btn" id="btn-lights-off">LIGHTS OFF</div>
     </div>
+
+    <div class="battery-panel">
+        <h3>BATTERY (RRC2054)</h3>
+        <div class="battery-row"><span>Voltage:</span><span class="battery-value" id="bat-v">-- mV</span></div>
+        <div class="battery-row"><span>Current:</span><span class="battery-value" id="bat-i">-- mA</span></div>
+        <div class="battery-row"><span>Temperature:</span><span class="battery-value" id="bat-t">-- &deg;C</span></div>
+        <div class="battery-row"><span>Charge:</span><span class="battery-value" id="bat-soc">-- %</span></div>
+        <div class="bar-wrap"><div class="bar-fill" id="bat-bar"></div></div>
+    </div>
+
     <div class="status" id="status">Ready</div>
 </div>
 
@@ -412,6 +483,21 @@ const char index_html[] PROGMEM = R"rawliteral(
         steerValue.innerText = val;
         sendCmd('steer_intensity', val);
     });
+
+    // ===== Обновление данных батареи =====
+    async function updateBattery() {
+        try {
+            const r = await fetch('/battery');
+            const d = await r.json();
+            document.getElementById('bat-v').innerText = d.voltage_mv + ' mV';
+            document.getElementById('bat-i').innerText = d.current_ma + ' mA';
+            document.getElementById('bat-t').innerText = d.temperature_c + ' \u00B0C';
+            document.getElementById('bat-soc').innerText = d.soc + ' %';
+            document.getElementById('bat-bar').style.width = d.soc + '%';
+        } catch(e) { /* нет связи — просто пропускаем */ }
+    }
+    setInterval(updateBattery, 2000);
+    window.addEventListener('load', updateBattery);
     
     window.addEventListener('beforeunload', () => sendCmd('stop'));
 </script>
@@ -422,6 +508,28 @@ const char index_html[] PROGMEM = R"rawliteral(
 // Web Server Handlers
 void handleRoot() {
     server.send(200, "text/html", index_html);
+}
+
+// ===== БАТАРЕЯ: HTTP JSON endpoint =====
+void handleBattery() {
+    uint16_t v; int16_t i, t; uint8_t soc; bool ok;
+    if (xSemaphoreTake(batteryDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        v   = batteryVoltage_mV;
+        i   = batteryCurrent_mA;
+        t   = batteryTemperature_C;
+        soc = batterySOC_percent;
+        ok  = batteryDataValid;
+        xSemaphoreGive(batteryDataMutex);
+    } else {
+        v = 0; i = 0; t = 0; soc = 0; ok = false;
+    }
+
+    char json[160];
+    snprintf(json, sizeof(json),
+             "{\"voltage_mv\":%u,\"current_ma\":%d,\"temperature_c\":%d,"
+             "\"soc\":%u,\"valid\":%s}",
+             v, i, t, soc, ok ? "true" : "false");
+    server.send(200, "application/json", json);
 }
 
 void handleCmd() {
@@ -495,6 +603,88 @@ void initWiFiAP() {
     Serial.println(WiFi.softAPIP());
 }
 
+// ===== БАТАРЕЯ: чтение слова SMBus =====
+bool smbusReadWord(uint8_t reg, uint16_t &value) {
+    Wire.beginTransmission(BATTERY_ADDR);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0) {
+        return false;
+    }
+    if (Wire.requestFrom((uint8_t)BATTERY_ADDR, (uint8_t)2) != 2) {
+        return false;
+    }
+    uint8_t low  = Wire.read();
+    uint8_t high = Wire.read();
+    value = ((uint16_t)high << 8) | low;   // SMBus: сначала младший байт
+    return true;
+}
+
+// ===== БАТАРЕЯ: задача FreeRTOS =====
+void batteryTask(void * parameter) {
+    const TickType_t xFrequency = pdMS_TO_TICKS(2000); // опрос каждые 2 с
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    uint32_t consecutiveErrors = 0;
+
+    for (;;) {
+        uint16_t raw;
+        uint16_t v_mV = 0;
+        int16_t  i_mA = 0;
+        int16_t  t_C  = 0;
+        uint8_t  soc  = 0;
+        bool     anyOk = false;
+
+        // Напряжение (мВ)
+        if (smbusReadWord(REG_VOLTAGE, raw)) {
+            v_mV = raw;
+            anyOk = true;
+        }
+
+        // Ток (мА, знаковый)
+        if (smbusReadWord(REG_CURRENT, raw)) {
+            i_mA = (int16_t)raw;
+            anyOk = true;
+        }
+
+        // Температура (0.1 K -> °C)
+        if (smbusReadWord(REG_TEMPERATURE, raw)) {
+            t_C = (int16_t)(raw / 10) - 273;
+            anyOk = true;
+        }
+
+        // Относительный заряд RSOC (0..100 %)
+        if (smbusReadWord(REG_RELATIVE_SOC, raw)) {
+            soc = (uint8_t)(raw > 100 ? 100 : raw);
+            anyOk = true;
+        }
+
+        if (xSemaphoreTake(batteryDataMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            if (anyOk) {
+                batteryVoltage_mV    = v_mV;
+                batteryCurrent_mA    = i_mA;
+                batteryTemperature_C = t_C;
+                batterySOC_percent   = soc;
+                batteryDataValid     = true;
+            } else {
+                batteryDataValid     = false;
+            }
+            xSemaphoreGive(batteryDataMutex);
+        }
+
+        if (anyOk) {
+            consecutiveErrors = 0;
+            Serial.printf("Battery: %u mV, %d mA, %d C, %u %%\n",
+                          v_mV, i_mA, t_C, soc);
+        } else {
+            if (consecutiveErrors < 5) {
+                Serial.println("Battery: SMBus read error");
+            }
+            consecutiveErrors++;
+        }
+
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+    }
+}
+
 void safetyTask(void * parameter) {
 
     const uint32_t COMMAND_TIMEOUT = 30000; // 30 секунд Таймаут бездействия (в миллисекундах)
@@ -542,10 +732,34 @@ void setup() {
     soundOff();
     delay(1000);
 
+    // ===== БАТАРЕЯ: инициализация I2C / SMBus =====
+    // Внешние подтяжки 1.5 кОм уже установлены, поэтому внутренние не включаем
+    pinMode(SMBUS_SDA_PIN, INPUT_PULLUP);
+    pinMode(SMBUS_SCL_PIN, INPUT_PULLUP);
+    Wire.begin(SMBUS_SDA_PIN, SMBUS_SCL_PIN);
+    Wire.setClock(100000);   // SMBus: 100 кГц
+    Serial.println("SMBus initialized (SDA=GPIO22/D22, SCL=GPIO21/D21)");
+
+    // Мьютекс для доступа к данным батареи
+    batteryDataMutex = xSemaphoreCreateMutex();
+
+    // Задача чтения батареи — на ядре 0
+    xTaskCreatePinnedToCore(
+        batteryTask,
+        "BatteryTask",
+        4096,
+        NULL,
+        1,
+        NULL,
+        0
+    );
+    Serial.println("Battery task started");
+
     initWiFiAP();
     server.on("/", handleRoot);
     server.on("/cmd", handleCmd);
-    
+    server.on("/battery", handleBattery);   // <-- новый endpoint
+
     lastCommandTime = millis();
 
     // OTA Update
@@ -610,4 +824,3 @@ void loop() {
     server.handleClient();
     delay(10);
 }
-
