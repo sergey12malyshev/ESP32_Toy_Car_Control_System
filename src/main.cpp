@@ -130,7 +130,7 @@ void softStartBackward(uint8_t targetSpeed, uint16_t rampTime_ms)
     if (targetSpeed == 0) 
     {
         return;
-    }f
+    }
 
     if (targetSpeed > PWM_MAX_DRIVE)
     {
@@ -380,8 +380,16 @@ const char index_html[] PROGMEM = R"rawliteral(
 </head>
 <body>
 <div class="container">
-    <h1>ESP32 CAR</h1>
     <div class="sub">Wi-Fi Remote Control</div>
+
+    <div class="battery-panel">
+        <h3>BATTERY (RRC2054)</h3>
+        <div class="battery-row"><span>Voltage:</span><span class="battery-value" id="bat-v">-- mV</span></div>
+        <!-- <div class="battery-row"><span>Current:</span><span class="battery-value" id="bat-i">-- mA</span></div> -->
+        <div class="battery-row"><span>Temperature:</span><span class="battery-value" id="bat-t">-- &deg;C</span></div>
+        <div class="battery-row"><span>Charge:</span><span class="battery-value" id="bat-soc">-- %</span></div>
+        <div class="bar-wrap"><div class="bar-fill" id="bat-bar"></div></div>
+    </div>
 
     <div class="dpad">
         <div class="dpad-row">
@@ -410,15 +418,6 @@ const char index_html[] PROGMEM = R"rawliteral(
         <div class="action-btn" id="btn-sound">HORN</div>
         <div class="action-btn" id="btn-lights-on">LIGHTS ON</div>
         <div class="action-btn" id="btn-lights-off">LIGHTS OFF</div>
-    </div>
-
-    <div class="battery-panel">
-        <h3>BATTERY (RRC2054)</h3>
-        <div class="battery-row"><span>Voltage:</span><span class="battery-value" id="bat-v">-- mV</span></div>
-        <div class="battery-row"><span>Current:</span><span class="battery-value" id="bat-i">-- mA</span></div>
-        <div class="battery-row"><span>Temperature:</span><span class="battery-value" id="bat-t">-- &deg;C</span></div>
-        <div class="battery-row"><span>Charge:</span><span class="battery-value" id="bat-soc">-- %</span></div>
-        <div class="bar-wrap"><div class="bar-fill" id="bat-bar"></div></div>
     </div>
 
     <div class="status" id="status">Ready</div>
@@ -490,7 +489,7 @@ const char index_html[] PROGMEM = R"rawliteral(
             const r = await fetch('/battery');
             const d = await r.json();
             document.getElementById('bat-v').innerText = d.voltage_mv + ' mV';
-            document.getElementById('bat-i').innerText = d.current_ma + ' mA';
+            //document.getElementById('bat-i').innerText = d.current_ma + ' mA';
             document.getElementById('bat-t').innerText = d.temperature_c + ' \u00B0C';
             document.getElementById('bat-soc').innerText = d.soc + ' %';
             document.getElementById('bat-bar').style.width = d.soc + '%';
@@ -621,7 +620,8 @@ bool smbusReadWord(uint8_t reg, uint16_t &value) {
 
 // ===== БАТАРЕЯ: задача FreeRTOS =====
 void batteryTask(void * parameter) {
-    const TickType_t xFrequency = pdMS_TO_TICKS(2000); // опрос каждые 2 с
+    const TickType_t xFrequency = pdMS_TO_TICKS(2000);  // цикл опроса каждые 2 с
+    const TickType_t xGap       = pdMS_TO_TICKS(25);    // пауза 25 мс между транзакциями
     TickType_t xLastWakeTime = xTaskGetTickCount();
     uint32_t consecutiveErrors = 0;
 
@@ -633,29 +633,35 @@ void batteryTask(void * parameter) {
         uint8_t  soc  = 0;
         bool     anyOk = false;
 
-        // Напряжение (мВ)
+        // --- Напряжение (мВ) ---
         if (smbusReadWord(REG_VOLTAGE, raw)) {
             v_mV = raw;
             anyOk = true;
         }
+        vTaskDelay(xGap);   // 25 мс
 
-        // Ток (мА, знаковый)
+        /* --- Ток (мА, знаковый) ---
         if (smbusReadWord(REG_CURRENT, raw)) {
             i_mA = (int16_t)raw;
             anyOk = true;
         }
+        */
+        vTaskDelay(xGap);   // 25 мс
 
-        // Температура (0.1 K -> °C)
+        // --- Температура (0.1 K -> °C) ---
         if (smbusReadWord(REG_TEMPERATURE, raw)) {
             t_C = (int16_t)(raw / 10) - 273;
             anyOk = true;
         }
+        vTaskDelay(xGap);   // 25 мс
 
-        // Относительный заряд RSOC (0..100 %)
+        // --- Относительный заряд RSOC (0..100 %) ---
         if (smbusReadWord(REG_RELATIVE_SOC, raw)) {
             soc = (uint8_t)(raw > 100 ? 100 : raw);
             anyOk = true;
         }
+        // Пауза после последней транзакции цикла не нужна —
+        // её обеспечит vTaskDelayUntil ниже.
 
         if (xSemaphoreTake(batteryDataMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
             if (anyOk) {
