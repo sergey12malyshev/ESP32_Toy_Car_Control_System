@@ -80,9 +80,16 @@ After connecting, open the following in your browser:
 
 External 1.5 kΩ pull-ups are mandatory — without them, SMBus communication with the battery will be unstable or will not work at all.
 
+## Hardware
+
+<img src="image/photo_2026-11-09_00-14-02.jpg" alt="platform" width="400">
+
+
 ## Control
 
 ### Web interface
+
+<img src="image/screen.bmp" alt="screen" width="400">
 
 - D-pad (UP / DOWN / L / R / STOP) — movement and rotation.
 - Sliders:
