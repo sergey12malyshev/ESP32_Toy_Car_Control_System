@@ -1,6 +1,6 @@
-# Electric Vehicle Control System (EN)
+# ESP32 Toy Car Control System
 
-Firmware for controlling an electric vehicle based on ESP32.
+Firmware for controlling an electric vehicle  based on ESP32.
 The device creates its own Wi-Fi access point with a web interface, controls motors via PWM, reads RRC2054 battery telemetry using the SMBus protocol, and supports OTA firmware updates over the air
 
 ## 🛠️ Toolkit
@@ -81,6 +81,55 @@ After connecting, open the following in your browser:
 External 1.5 kΩ pull-ups are mandatory — without them, SMBus communication with the battery will be unstable or will not work at all.
 
 ## Hardware
+
+                        ┌─────────────────────────────────────────┐
+                        │            CONTROL BOARD                │
+                        │               ESP32                     │
+                        │                                         │
+   ┌──────────┐   SMBus │   (SMBD/SMBC)                           │
+   │ Battery  ├─────────┼──► GPIO21 / GPIO22 ◄── 1.5 kΩ pull-up   │
+   │ RRC2054  │         │                                         │
+   │ SBS/SMBus│         │  GPIO18 ──┐   GPIO23──┐          GPIO4  │---> BUZZER PIN
+   └────┬─────┘         │           │           │          GPIO15 │---> LED PIN_STOP_RIGHT
+        │               │  GPIO5  ──┼──┐        │          GPIO2  │---> LED PIN_STOP_LEFT
+        │ 14.4 V        │  GPIO19 ──┼──┼──┐     │                 │
+        │               └───────────┼──┼──┼─────┼─────────────────┘
+        │                           │  │  │     │
+   ┌────▼─────┐                     │  │  │     │
+   │  Power   │                     │  │  │     │
+   │  Switch  │                     │  │  │     │
+   └────┬─────┘                     │  │  │     │
+        │ V_SW                      │  │  │     │
+   ┌────▼─────────────┐             │  │  │     │
+   │ Step-down DC/DC  │             │  │  │     │
+   │  7.4 V           │             │  │  │     │
+   └──┬──────────┬────┘             │  │  │     │
+      │V_LOGIC   │V_MOTOR           │  │  ▼     │
+      │          │                  │  │        │
+      │          │       ┌──────────▼──▼───┐    │
+      │          │       │   H-BRIDGE #1   │    │
+      │          │       │  (bipolar       │    │
+      │          │       │   transistors)  │    │
+      │          │       └───┬───────┬─────┘    │
+      │          │           │OUT1   │OUT2      │
+      │          │       ┌───▼───────▼─────┐    │
+      │          │       │   Drive Motor   │    │
+      │          │       │                 │    │
+      │          │       └─────────────────┘    │
+      │          │                              │
+      │          │       ┌───────────────────── ▼┐
+      │          │       │     H-BRIDGE #2       │
+      │          │       │  (bipolar             │
+      │          │       │   transistors)        │
+      │          │       └───┬───────────┬───────┘
+      │          │           │OUT3       │OUT4
+      │          │       ┌───▼───────────▼─────┐
+      │          │       │  Steering Motor     │
+      │          │       └─────────────────────┘
+      │          │
+      │          └──► power for H-bridges (V_MOTOR)
+      │
+      └──────────────► power for ESP32 board (V_LOGIC)
 
 <img src="image/photo_2026-11-09_00-14-02.jpg" alt="platform" width="400">
 

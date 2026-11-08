@@ -1,3 +1,9 @@
+/*
+ESP32 Toy Car Control System
+https://github.com/sergey12malyshev
+2026
+*/
+
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
