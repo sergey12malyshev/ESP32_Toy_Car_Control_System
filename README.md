@@ -82,54 +82,52 @@ External 1.5 kΩ pull-ups are mandatory — without them, SMBus communication wi
 
 ## Hardware
 
-                        ┌─────────────────────────────────────────┐
-                        │            CONTROL BOARD                │
-                        │               ESP32                     │
-                        │                                         │
-   ┌──────────┐   SMBus │   (SMBD/SMBC)                           │
-   │ Battery  ├─────────┼──► GPIO21 / GPIO22 ◄── 1.5 kΩ pull-up   │
-   │ RRC2054  │         │                                         │
-   │ SBS/SMBus│         │  GPIO18 ──┐   GPIO23──┐          GPIO4  │---> BUZZER PIN
-   └────┬─────┘         │           │           │          GPIO15 │---> LED PIN_STOP_RIGHT
-        │               │  GPIO5  ──┼──┐        │          GPIO2  │---> LED PIN_STOP_LEFT
-        │ 14.4 V        │  GPIO19 ──┼──┼──┐     │                 │
-        │               └───────────┼──┼──┼─────┼─────────────────┘
-        │                           │  │  │     │
-   ┌────▼─────┐                     │  │  │     │
-   │  Power   │                     │  │  │     │
-   │  Switch  │                     │  │  │     │
-   └────┬─────┘                     │  │  │     │
-        │ V_SW                      │  │  │     │
-   ┌────▼─────────────┐             │  │  │     │
-   │ Step-down DC/DC  │             │  │  │     │
-   │  7.4 V           │             │  │  │     │
-   └──┬──────────┬────┘             │  │  │     │
-      │V_LOGIC   │V_MOTOR           │  │  ▼     │
-      │          │                  │  │        │
-      │          │       ┌──────────▼──▼───┐    │
-      │          │       │   H-BRIDGE #1   │    │
-      │          │       │  (bipolar       │    │
-      │          │       │   transistors)  │    │
-      │          │       └───┬───────┬─────┘    │
-      │          │           │OUT1   │OUT2      │
-      │          │       ┌───▼───────▼─────┐    │
-      │          │       │   Drive Motor   │    │
-      │          │       │                 │    │
-      │          │       └─────────────────┘    │
-      │          │                              │
-      │          │       ┌───────────────────── ▼┐
-      │          │       │     H-BRIDGE #2       │
-      │          │       │  (bipolar             │
-      │          │       │   transistors)        │
-      │          │       └───┬───────────┬───────┘
-      │          │           │OUT3       │OUT4
-      │          │       ┌───▼───────────▼─────┐
-      │          │       │  Steering Motor     │
-      │          │       └─────────────────────┘
-      │          │
-      │          └──► power for H-bridges (V_MOTOR)
-      │
-      └──────────────► power for ESP32 board (V_LOGIC)
+                        +-----------------------------------------+
+                        |            CONTROL BOARD                |
+                        |               ESP32                     |
+                        |                                         |
+   +----------+         |  SMBus (SMBD/SMBC)                      |
+   | Battery  +---------+--> GPIO21 / GPIO22 <-- 1.5 kOhm pull-up|
+   | RRC2054  |         |                                         |
+   | SBS/SMBus|         |  GPIO18 --+   GPIO23 --+   GPIO4  ------+--> BUZZER
+   +----+-----+         |           |           |                 |
+        |               |  GPIO5  --+   GPIO19 --+   GPIO15 ------+--> LED STOP RIGHT
+        | 14.4 V        |           |           |     GPIO2  -----+--> LED STOP LEFT
+        |               +-----------+-----------+-----------------+
+        |                           |  |  |     |
+   +----+-----+                     |  |  |     |
+   |  Power   |                     |  |  |     |
+   |  Switch  |                     |  |  |     |
+   +----+-----+                     |  |  |     |
+        | V_SW                      |  |  |     |
+   +----+--------------+            |  |  |     |
+   | Step-down DC/DC   |            |  |  |     |
+   |   7.4 V           |            |  |  |     |
+   +--+-----------+----+            |  |  |     |
+      |V_LOGIC    |V_MOTOR          |  |  |     |
+      |           |                 |  |  |     |
+      |           |       +---------+--+--+     |
+      |           |       |   H-BRIDGE #1       |
+      |           |       |  (bipolar transistors)
+      |           |       +----+----------+-----+
+      |           |            |OUT1      |OUT2
+      |           |       +----+----------+-----+
+      |           |       |   Drive Motor       |
+      |           |       +---------------------+
+      |           |
+      |           |       +---------------------+
+      |           |       |   H-BRIDGE #2       |
+      |           |       |  (bipolar transistors)
+      |           |       +----+----------+-----+
+      |           |            |OUT3      |OUT4
+      |           |       +----+----------+-----+
+      |           |       |  Steering Motor     |
+      |           |       +---------------------+
+      |           |
+      |           +------> power for H-bridges (V_MOTOR)
+      |
+      +------------------> power for ESP32 board (V_LOGIC)
+      
 
 <img src="image/photo_2026-11-09_00-14-02.jpg" alt="platform" width="400">
 
