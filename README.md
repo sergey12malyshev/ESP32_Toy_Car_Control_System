@@ -127,7 +127,7 @@ External 1.5 kΩ pull-ups are mandatory — without them, SMBus communication wi
       |           +------> power for H-bridges (V_MOTOR)
       |
       +------------------> power for ESP32 board (V_LOGIC)
-      
+
 
 <img src="image/photo_2026-11-09_00-14-02.jpg" alt="platform" width="400">
 
