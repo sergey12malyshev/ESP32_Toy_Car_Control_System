@@ -7,12 +7,16 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-// ===== БАТАРЕЯ (SMBus) =====
+// ===== BATTERY (SMBus) =====
 #include <Wire.h>
 #include <esp_task_wdt.h>
 
+/*
+ Config
+*/
+#define RCC_SMART_BATTERY_EN     1
 
-// Глобальная переменная для времени последней команды
+
 static volatile uint32_t lastCommandTime = 0;
 
 
@@ -37,27 +41,27 @@ static volatile uint32_t lastCommandTime = 0;
 #define PWM_MIN_DRIVE    1
 #define PWM_MIN_STEER    1
 
-// ===== БАТАРЕЯ (SMBus) =====
-// SMBD (данные) -> D22 -> GPIO22
-// SMBC (тактовая) -> D21 -> GPIO21
+// ===== BATTERY (SMBus) =====
+// SMBD (DATA) -> D22 -> GPIO22
+// SMBC (CLOCK) -> D21 -> GPIO21
 #define SMBUS_SDA_PIN  21
 #define SMBUS_SCL_PIN  22
-#define BATTERY_ADDR   0x0B    // Стандартный адрес SMBus-батареи
+#define BATTERY_ADDR   0x0B    // SMBus-battery
 
-// Регистры SBS (Smart Battery System)
+// SBS (Smart Battery System)
 #define REG_TEMPERATURE      0x08
 #define REG_VOLTAGE          0x09
 #define REG_CURRENT          0x0A
 #define REG_RELATIVE_SOC     0x0D
 
-// Последние прочитанные значения
+// last data
 static volatile uint16_t batteryVoltage_mV   = 0;
 static volatile int16_t  batteryCurrent_mA   = 0;
 static volatile int16_t  batteryTemperature_C = 0;
 static volatile uint8_t  batterySOC_percent  = 0;
 static volatile bool     batteryDataValid    = false;
 
-// Мьютекс для доступа к данным батареи (из веб-обработчиков и задачи)
+// Mutex for accessing battery data (from web handlers and tasks)
 static SemaphoreHandle_t batteryDataMutex = NULL;
 
 
@@ -67,8 +71,8 @@ const char* password = "12345678";
 
 WebServer server(80);
 
-uint8_t currentDriveSpeedTarget = 185;   // текущая целевая скорость (0-255)
-uint8_t currentSteerIntensity = 215;     // интенсивность поворота (0-255)
+uint8_t currentDriveSpeedTarget = 185;   // current target speed (0-255)
+uint8_t currentSteerIntensity = 215;     // rotation intensity (0-255
 
 struct Version
 {
@@ -483,7 +487,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         sendCmd('steer_intensity', val);
     });
 
-    // ===== Обновление данных батареи =====
+    // ===== update data battery =====
     async function updateBattery() {
         try {
             const r = await fetch('/battery');
@@ -509,7 +513,7 @@ void handleRoot() {
     server.send(200, "text/html", index_html);
 }
 
-// ===== БАТАРЕЯ: HTTP JSON endpoint =====
+// ===== battery: HTTP JSON endpoint =====
 void handleBattery() {
     uint16_t v; int16_t i, t; uint8_t soc; bool ok;
     if (xSemaphoreTake(batteryDataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
@@ -541,7 +545,7 @@ void handleCmd() {
     }
     String cmd = server.arg("q");
     if (cmd == "forward") {
-        softStartForward(currentDriveSpeedTarget, 500); // плавный разгон 500 мс
+        softStartForward(currentDriveSpeedTarget, 500); // smooth acceleration 500 ms
         server.send(200, "text/plain", "OK");
     } 
     else if (cmd == "backward") {
@@ -602,7 +606,7 @@ void initWiFiAP() {
     Serial.println(WiFi.softAPIP());
 }
 
-// ===== БАТАРЕЯ: чтение слова SMBus =====
+// ===== battery: read word SMBus =====
 bool smbusReadWord(uint8_t reg, uint16_t &value) {
     Wire.beginTransmission(BATTERY_ADDR);
     Wire.write(reg);
@@ -614,14 +618,14 @@ bool smbusReadWord(uint8_t reg, uint16_t &value) {
     }
     uint8_t low  = Wire.read();
     uint8_t high = Wire.read();
-    value = ((uint16_t)high << 8) | low;   // SMBus: сначала младший байт
+    value = ((uint16_t)high << 8) | low;
     return true;
 }
 
-// ===== БАТАРЕЯ: задача FreeRTOS =====
+// ===== battery: task FreeRTOS =====
 void batteryTask(void * parameter) {
-    const TickType_t xFrequency = pdMS_TO_TICKS(2000);  // цикл опроса каждые 2 с
-    const TickType_t xGap       = pdMS_TO_TICKS(25);    // пауза 25 мс между транзакциями
+    const TickType_t xFrequency = pdMS_TO_TICKS(2000);
+    const TickType_t xGap       = pdMS_TO_TICKS(25);
     TickType_t xLastWakeTime = xTaskGetTickCount();
     uint32_t consecutiveErrors = 0;
 
@@ -633,35 +637,33 @@ void batteryTask(void * parameter) {
         uint8_t  soc  = 0;
         bool     anyOk = false;
 
-        // --- Напряжение (мВ) ---
+        // --- voltage (mv) ---
         if (smbusReadWord(REG_VOLTAGE, raw)) {
             v_mV = raw;
             anyOk = true;
         }
-        vTaskDelay(xGap);   // 25 мс
+        vTaskDelay(xGap);   // 25 ms
 
-        /* --- Ток (мА, знаковый) ---
+        /* --- current (mA) ---
         if (smbusReadWord(REG_CURRENT, raw)) {
             i_mA = (int16_t)raw;
             anyOk = true;
         }
         */
-        vTaskDelay(xGap);   // 25 мс
+        vTaskDelay(xGap);   // 25 ms
 
-        // --- Температура (0.1 K -> °C) ---
+        // --- temperature (0.1 K -> °C) ---
         if (smbusReadWord(REG_TEMPERATURE, raw)) {
             t_C = (int16_t)(raw / 10) - 273;
             anyOk = true;
         }
-        vTaskDelay(xGap);   // 25 мс
+        vTaskDelay(xGap);   // 25 ms
 
-        // --- Относительный заряд RSOC (0..100 %) ---
+        // --- RSOC (0..100 %) ---
         if (smbusReadWord(REG_RELATIVE_SOC, raw)) {
             soc = (uint8_t)(raw > 100 ? 100 : raw);
             anyOk = true;
         }
-        // Пауза после последней транзакции цикла не нужна —
-        // её обеспечит vTaskDelayUntil ниже.
 
         if (xSemaphoreTake(batteryDataMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
             if (anyOk) {
@@ -693,23 +695,22 @@ void batteryTask(void * parameter) {
 
 void safetyTask(void * parameter) {
 
-    const uint32_t COMMAND_TIMEOUT = 30000; // 30 секунд Таймаут бездействия (в миллисекундах)
+    const uint32_t COMMAND_TIMEOUT = 30000; // 30 sec.
 
     vTaskDelay(10000 / portTICK_PERIOD_MS);
 
     for (;;) {
         vTaskDelay(5000 / portTICK_PERIOD_MS);
         
-        // Количество подключённых клиентов
+        // number clients
         int clients = WiFi.softAPgetStationNum();
-        // Время с последней команды
+     
         uint32_t now = (uint32_t) millis();
         uint32_t elapsed = now - lastCommandTime;
         
         if (clients == 0 || elapsed > COMMAND_TIMEOUT) {
-            // Аварийная остановка (idempotent, можно вызывать много раз)
-            allOff();
 
+            allOff();
             soundOn();
             delay(100);
             Serial.printf("Not connect!");
@@ -738,18 +739,21 @@ void setup() {
     soundOff();
     delay(1000);
 
-    // ===== БАТАРЕЯ: инициализация I2C / SMBus =====
-    // Внешние подтяжки 1.5 кОм уже установлены, поэтому внутренние не включаем
+#if RCC_SMART_BATTERY_EN
+    // ===== battery: init I2C / SMBus =====
+    // External pull-up 1.5 kOhm
     pinMode(SMBUS_SDA_PIN, INPUT_PULLUP);
     pinMode(SMBUS_SCL_PIN, INPUT_PULLUP);
     Wire.begin(SMBUS_SDA_PIN, SMBUS_SCL_PIN);
     Wire.setClock(100000);   // SMBus: 100 кГц
     Serial.println("SMBus initialized (SDA=GPIO22/D22, SCL=GPIO21/D21)");
 
-    // Мьютекс для доступа к данным батареи
+    // Mutex battery data
     batteryDataMutex = xSemaphoreCreateMutex();
+#endif //RCC_SMART_BATTERY_EN
 
-    // Задача чтения батареи — на ядре 0
+#if RCC_SMART_BATTERY_EN
+    // Task read battery — in core 0
     xTaskCreatePinnedToCore(
         batteryTask,
         "BatteryTask",
@@ -760,16 +764,17 @@ void setup() {
         0
     );
     Serial.println("Battery task started");
+#endif //RCC_SMART_BATTERY_EN
 
     initWiFiAP();
     server.on("/", handleRoot);
     server.on("/cmd", handleCmd);
-    server.on("/battery", handleBattery);   // <-- новый endpoint
+    server.on("/battery", handleBattery);   // <-- nev endpoint
 
     lastCommandTime = millis();
 
     // OTA Update
-    // Страница с формой для загрузки (GET)
+    // Load page (GET)
     server.on("/update", HTTP_GET, []() {
         server.send(200, "text/html",
             "<!DOCTYPE html>"
@@ -785,7 +790,7 @@ void setup() {
         );
     });
 
-    // Обработка POST-запроса с файлом
+    // update POST-get file
     server.on("/update", HTTP_POST, []() {
         server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
         ESP.restart();
@@ -812,15 +817,15 @@ void setup() {
     server.begin();
     Serial.println("HTTP server started");
 
-    // Создаём задачу безопасности на втором ядре (ядро 1)
+    // Create safety task (ядро 1)
     xTaskCreatePinnedToCore(
-        safetyTask,      // функция задачи
-        "SafetyTask",    // имя
-        2048,            // размер стека
-        NULL,            // параметр
-        1,               // приоритет (низкий)
+        safetyTask,      // task function
+        "SafetyTask",    // name
+        2048,            // stack size
+        NULL,            // param.
+        1,               // prior. (низкий)
         NULL,            // handle
-        1                // ядро (1)
+        1                // core (1)
     );
     Serial.println("Safety task started");
 }
